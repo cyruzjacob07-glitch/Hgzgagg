@@ -1,0 +1,1426 @@
+-- Left 4 Blox Script
+-- Author: ipako
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+
+local silentAimEnabled = false
+local espEnabled = false
+local autoKillEnabled = false
+local zombieModeEnabled = false
+local chamsEnabled = false
+local hpDisplayEnabled = false
+local flyEnabled = false
+local noclipEnabled = false
+local flySpeed = 50
+local aimFOV = 150
+local wallbangEnabled = false
+local wallbangConnection = nil
+local damageBoostEnabled = false
+local viewmodelOffset = Vector3.new(0, 0, 0)
+local viewmodelConnection = nil
+local defaultFOV = 70
+local hitboxEnabled = false
+local hitboxSize = 10
+local hitboxConnection = nil
+local hitboxOriginal = {}
+local bhopEnabled = false
+local bhopConnection = nil
+local infJumpConnection = nil
+local femboySkinEnabled = false
+local femboySkinConnection = nil
+local femboySkinOriginal = {}
+local espConnection = nil
+local killConnection = nil
+local chamsConnection = nil
+local hpConnection = nil
+local flyConnection = nil
+local noclipConnection = nil
+local flyBody = nil
+local flyGyro = nil
+
+local Window = Fluent:CreateWindow({
+    Title = "Left 4 Blox",
+    SubTitle = "by ipako",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 460),
+    Acrylic = true,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.RightControl
+})
+
+local Tabs = {
+    Combat = Window:AddTab({ Title = "Combat", Icon = "sword" }),
+    Visuals = Window:AddTab({ Title = "Visuals", Icon = "eye" }),
+    Misc = Window:AddTab({ Title = "Misc", Icon = "settings" })
+}
+
+local function getCharacter()
+    return LocalPlayer.Character
+end
+
+local function getRootPart()
+    local char = getCharacter()
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function findZombies()
+    local zombies = {}
+    for _, v in pairs(workspace:GetDescendants()) do
+        if v:IsA("Model") and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") then
+            local char = getCharacter()
+            if v.Name:lower():find("zombie") or v.Name:lower():find("infected") or 
+               (v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 and v ~= char) then
+                table.insert(zombies, v)
+            end
+        end
+    end
+    return zombies
+end
+
+local function findPlayers()
+    local players = {}
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and 
+           player.Character:FindFirstChild("Humanoid") and 
+           player.Character:FindFirstChild("HumanoidRootPart") and
+           player.Character.Humanoid.Health > 0 then
+            table.insert(players, player.Character)
+        end
+    end
+    return players
+end
+
+local function getClosestTarget()
+    local closestTarget = nil
+    local closestDistance = math.huge
+    local rootPart = getRootPart()
+    
+    if not rootPart then return nil end
+    
+    local targets = zombieModeEnabled and findPlayers() or findZombies()
+    
+    for _, target in pairs(targets) do
+        if target:FindFirstChild("HumanoidRootPart") and target:FindFirstChild("Head") then
+            local distance = (rootPart.Position - target.HumanoidRootPart.Position).Magnitude
+            if distance < closestDistance and distance < 500 then
+                closestDistance = distance
+                closestTarget = target
+            end
+        end
+    end
+    
+    return closestTarget
+end
+
+local UserInputService = game:GetService("UserInputService")
+local aimbotConnection = nil
+
+local fovCircle = Drawing.new("Circle")
+fovCircle.Color = Color3.fromRGB(255, 255, 255)
+fovCircle.Thickness = 1.5
+fovCircle.Filled = false
+fovCircle.Transparency = 0.8
+fovCircle.NumSides = 64
+fovCircle.Radius = aimFOV
+fovCircle.Visible = false
+
+RunService.RenderStepped:Connect(function()
+    fovCircle.Position = Vector2.new(
+        workspace.CurrentCamera.ViewportSize.X / 2,
+        workspace.CurrentCamera.ViewportSize.Y / 2
+    )
+    fovCircle.Radius = aimFOV
+end)
+
+local function getClosestTargetInFOV()
+    local closestTarget = nil
+    local closestScreenDist = math.huge
+    local camera = workspace.CurrentCamera
+    if not camera then return nil end
+    
+    local screenCenter = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+    local rootPart = getRootPart()
+    if not rootPart then return nil end
+    
+    local targets = zombieModeEnabled and findPlayers() or findZombies()
+    
+    for _, target in pairs(targets) do
+        if target:FindFirstChild("Head") and target:FindFirstChild("Humanoid") then
+            local headPos, onScreen = camera:WorldToViewportPoint(target.Head.Position)
+            if onScreen then
+                local screenPos = Vector2.new(headPos.X, headPos.Y)
+                local screenDist = (screenCenter - screenPos).Magnitude
+                if screenDist <= aimFOV and screenDist < closestScreenDist then
+                    closestScreenDist = screenDist
+                    closestTarget = target
+                end
+            end
+        end
+    end
+    
+    return closestTarget
+end
+
+local function startAimbot()
+    if aimbotConnection then aimbotConnection:Disconnect() end
+    fovCircle.Visible = true
+    aimbotConnection = RunService.RenderStepped:Connect(function()
+        if not silentAimEnabled then return end
+        if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then return end
+        
+        local closestTarget = getClosestTargetInFOV()
+        if not closestTarget then return end
+        if not closestTarget:FindFirstChild("Head") then return end
+        
+        local camera = workspace.CurrentCamera
+        if not camera then return end
+        
+        camera.CFrame = CFrame.new(camera.CFrame.Position, closestTarget.Head.Position)
+    end)
+end
+
+local function stopAimbot()
+    if aimbotConnection then
+        aimbotConnection:Disconnect()
+        aimbotConnection = nil
+    end
+    fovCircle.Visible = false
+end
+
+local function createESP(target)
+    if not target or not target:FindFirstChild("HumanoidRootPart") then return end
+    
+    if target:FindFirstChild("HumanoidRootPart"):FindFirstChild("TargetESP") then return end
+    
+    local billboardGui = Instance.new("BillboardGui")
+    billboardGui.Name = "TargetESP"
+    billboardGui.Adornee = target.HumanoidRootPart
+    billboardGui.Size = UDim2.new(0, 100, 0, 50)
+    billboardGui.StudsOffset = Vector3.new(0, 3, 0)
+    billboardGui.AlwaysOnTop = true
+    billboardGui.Parent = target.HumanoidRootPart
+    
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 1, 0)
+    frame.BackgroundTransparency = 0.5
+    frame.BackgroundColor3 = zombieModeEnabled and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
+    frame.BorderSizePixel = 2
+    frame.BorderColor3 = Color3.fromRGB(255, 255, 0)
+    frame.Parent = billboardGui
+    
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(1, 0, 0.5, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = target.Name
+    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    nameLabel.TextScaled = true
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.Parent = frame
+    
+    local distanceLabel = Instance.new("TextLabel")
+    distanceLabel.Size = UDim2.new(1, 0, 0.5, 0)
+    distanceLabel.Position = UDim2.new(0, 0, 0.5, 0)
+    distanceLabel.BackgroundTransparency = 1
+    distanceLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
+    distanceLabel.TextScaled = true
+    distanceLabel.Font = Enum.Font.Gotham
+    distanceLabel.Parent = frame
+    
+    spawn(function()
+        while target and target.Parent and billboardGui.Parent and espEnabled do
+            local rootPart = getRootPart()
+            if rootPart and target:FindFirstChild("HumanoidRootPart") then
+                local distance = (rootPart.Position - target.HumanoidRootPart.Position).Magnitude
+                distanceLabel.Text = math.floor(distance) .. " studs"
+            end
+            wait(0.1)
+        end
+    end)
+    
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "TargetHighlight"
+    highlight.FillColor = zombieModeEnabled and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 0)
+    highlight.FillTransparency = 0.5
+    highlight.OutlineTransparency = 0
+    highlight.Parent = target
+end
+
+local function toggleESP(state)
+    if state then
+        espConnection = RunService.Heartbeat:Connect(function()
+            if not espEnabled then return end
+            
+            local targets = zombieModeEnabled and findPlayers() or findZombies()
+            for _, target in pairs(targets) do
+                createESP(target)
+            end
+        end)
+    else
+        if espConnection then
+            espConnection:Disconnect()
+        end
+        
+        for _, obj in pairs(workspace:GetDescendants()) do
+            if obj:IsA("BillboardGui") and obj.Name == "TargetESP" then
+                obj:Destroy()
+            end
+            if obj:IsA("Highlight") and obj.Name == "TargetHighlight" then
+                obj:Destroy()
+            end
+        end
+    end
+end
+
+local function createChams(player)
+    if not player or not player.Character then return end
+    local character = player.Character
+    
+    if character:FindFirstChild("PlayerChams") then return end
+    
+    local teamColor = Color3.fromRGB(255, 255, 255)
+    
+    if player.Team then
+        teamColor = player.Team.TeamColor.Color
+    elseif player.TeamColor then
+        teamColor = player.TeamColor.Color
+    end
+    
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "PlayerChams"
+    highlight.FillColor = teamColor
+    highlight.OutlineColor = teamColor
+    highlight.FillTransparency = 0.3
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Parent = character
+end
+
+local function toggleChams(state)
+    if state then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                createChams(player)
+            end
+        end
+        
+        chamsConnection = Players.PlayerAdded:Connect(function(player)
+            if chamsEnabled then
+                player.CharacterAdded:Connect(function(character)
+                    wait(0.5)
+                    if chamsEnabled then
+                        createChams(player)
+                    end
+                end)
+            end
+        end)
+        
+        spawn(function()
+            while chamsEnabled do
+                for _, player in pairs(Players:GetPlayers()) do
+                    if player ~= LocalPlayer and player.Character then
+                        if not player.Character:FindFirstChild("PlayerChams") then
+                            createChams(player)
+                        end
+                    end
+                end
+                wait(1)
+            end
+        end)
+    else
+        if chamsConnection then
+            chamsConnection:Disconnect()
+        end
+        
+        for _, player in pairs(Players:GetPlayers()) do
+            if player.Character then
+                local chams = player.Character:FindFirstChild("PlayerChams")
+                if chams then
+                    chams:Destroy()
+                end
+            end
+        end
+    end
+end
+
+local function createHPDisplay(player)
+    if not player or not player.Character then return end
+    local character = player.Character
+    local humanoid = character:FindFirstChild("Humanoid")
+    local head = character:FindFirstChild("Head")
+    if not humanoid or not head then return end
+
+    if head:FindFirstChild("HPDisplay") then return end
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "HPDisplay"
+    billboard.Adornee = head
+    billboard.Size = UDim2.new(0, 120, 0, 40)
+    billboard.StudsOffset = Vector3.new(0, 2.5, 0)
+    billboard.AlwaysOnTop = true
+    billboard.Parent = head
+
+    local bgBar = Instance.new("Frame")
+    bgBar.Name = "BgBar"
+    bgBar.Size = UDim2.new(1, 0, 0, 8)
+    bgBar.Position = UDim2.new(0, 0, 0, 0)
+    bgBar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    bgBar.BorderSizePixel = 1
+    bgBar.BorderColor3 = Color3.fromRGB(0, 0, 0)
+    bgBar.Parent = billboard
+
+    local uiCornerBg = Instance.new("UICorner")
+    uiCornerBg.CornerRadius = UDim.new(0, 4)
+    uiCornerBg.Parent = bgBar
+
+    local hpBar = Instance.new("Frame")
+    hpBar.Name = "HPBar"
+    hpBar.Size = UDim2.new(math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1), 0, 1, 0)
+    hpBar.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+    hpBar.BorderSizePixel = 0
+    hpBar.Parent = bgBar
+
+    local uiCornerFill = Instance.new("UICorner")
+    uiCornerFill.CornerRadius = UDim.new(0, 4)
+    uiCornerFill.Parent = hpBar
+
+    local hpText = Instance.new("TextLabel")
+    hpText.Name = "HPText"
+    hpText.Size = UDim2.new(1, 0, 0, 18)
+    hpText.Position = UDim2.new(0, 0, 0, 10)
+    hpText.BackgroundTransparency = 1
+    hpText.Text = math.floor(humanoid.Health) .. "/" .. math.floor(humanoid.MaxHealth)
+    hpText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    hpText.TextStrokeTransparency = 0.4
+    hpText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    hpText.TextScaled = true
+    hpText.Font = Enum.Font.GothamBold
+    hpText.Parent = billboard
+
+    local nameText = Instance.new("TextLabel")
+    nameText.Name = "NameText"
+    nameText.Size = UDim2.new(1, 0, 0, 14)
+    nameText.Position = UDim2.new(0, 0, 0, 26)
+    nameText.BackgroundTransparency = 1
+    nameText.Text = player.Name
+    nameText.TextColor3 = Color3.fromRGB(200, 200, 255)
+    nameText.TextStrokeTransparency = 0.5
+    nameText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    nameText.TextScaled = true
+    nameText.Font = Enum.Font.Gotham
+    nameText.Parent = billboard
+
+    spawn(function()
+        while hpDisplayEnabled and character and character.Parent and humanoid and humanoid.Parent do
+            local ratio = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
+            hpBar.Size = UDim2.new(ratio, 0, 1, 0)
+
+            if ratio > 0.5 then
+                hpBar.BackgroundColor3 = Color3.fromRGB(
+                    math.floor(255 * (1 - ratio) * 2),
+                    255,
+                    0
+                )
+            else
+                hpBar.BackgroundColor3 = Color3.fromRGB(
+                    255,
+                    math.floor(255 * ratio * 2),
+                    0
+                )
+            end
+
+            hpText.Text = math.floor(humanoid.Health) .. "/" .. math.floor(humanoid.MaxHealth)
+            wait(0.1)
+        end
+        if billboard and billboard.Parent then
+            billboard:Destroy()
+        end
+    end)
+end
+
+local function removeAllHPDisplays()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local head = player.Character:FindFirstChild("Head")
+            if head then
+                local hpGui = head:FindFirstChild("HPDisplay")
+                if hpGui then
+                    hpGui:Destroy()
+                end
+            end
+        end
+    end
+end
+
+local function toggleHPDisplay(state)
+    if state then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                createHPDisplay(player)
+            end
+        end
+
+        hpConnection = RunService.Heartbeat:Connect(function()
+            if not hpDisplayEnabled then return end
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and player.Character then
+                    local head = player.Character:FindFirstChild("Head")
+                    if head and not head:FindFirstChild("HPDisplay") then
+                        createHPDisplay(player)
+                    end
+                end
+            end
+        end)
+    else
+        if hpConnection then
+            hpConnection:Disconnect()
+            hpConnection = nil
+        end
+        removeAllHPDisplays()
+    end
+end
+
+local function startFly()
+    local char = getCharacter()
+    local rootPart = getRootPart()
+    if not char or not rootPart then return end
+    local humanoid = char:FindFirstChild("Humanoid")
+    if humanoid then
+        humanoid.PlatformStand = true
+    end
+
+    if rootPart:FindFirstChild("FlyVelocity") then rootPart:FindFirstChild("FlyVelocity"):Destroy() end
+    if rootPart:FindFirstChild("FlyGyro") then rootPart:FindFirstChild("FlyGyro"):Destroy() end
+
+    flyBody = Instance.new("BodyVelocity")
+    flyBody.Name = "FlyVelocity"
+    flyBody.Velocity = Vector3.new(0, 0, 0)
+    flyBody.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    flyBody.Parent = rootPart
+
+    flyGyro = Instance.new("BodyGyro")
+    flyGyro.Name = "FlyGyro"
+    flyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+    flyGyro.P = 9000
+    flyGyro.D = 500
+    flyGyro.Parent = rootPart
+
+    if flyConnection then flyConnection:Disconnect() end
+    flyConnection = RunService.RenderStepped:Connect(function()
+        if not flyEnabled then return end
+        local r = getRootPart()
+        if not r or not flyBody or not flyBody.Parent then return end
+
+        local camera = workspace.CurrentCamera
+        local direction = Vector3.new(0, 0, 0)
+        local camCF = camera.CFrame
+
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+            direction = direction + camCF.LookVector
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+            direction = direction - camCF.LookVector
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+            direction = direction - camCF.RightVector
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+            direction = direction + camCF.RightVector
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+            direction = direction + Vector3.new(0, 1, 0)
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+            direction = direction - Vector3.new(0, 1, 0)
+        end
+
+        if direction.Magnitude > 0 then
+            direction = direction.Unit * flySpeed
+        end
+
+        flyBody.Velocity = direction
+        flyGyro.CFrame = camCF
+    end)
+end
+
+local function stopFly()
+    if flyConnection then
+        flyConnection:Disconnect()
+        flyConnection = nil
+    end
+    local char = getCharacter()
+    local rootPart = getRootPart()
+    if rootPart then
+        if rootPart:FindFirstChild("FlyVelocity") then rootPart:FindFirstChild("FlyVelocity"):Destroy() end
+        if rootPart:FindFirstChild("FlyGyro") then rootPart:FindFirstChild("FlyGyro"):Destroy() end
+    end
+    if char then
+        local humanoid = char:FindFirstChild("Humanoid")
+        if humanoid then
+            humanoid.PlatformStand = false
+        end
+    end
+    flyBody = nil
+    flyGyro = nil
+end
+
+local function startNoclip()
+    if noclipConnection then noclipConnection:Disconnect() end
+    noclipConnection = RunService.Stepped:Connect(function()
+        if not noclipEnabled then return end
+        local char = getCharacter()
+        if not char then return end
+        for _, part in pairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end)
+end
+
+local function stopNoclip()
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
+    end
+end
+
+local wallbangOriginal = {}
+
+local function startWallbang()
+    if wallbangConnection then wallbangConnection:Disconnect() end
+    wallbangConnection = RunService.Heartbeat:Connect(function()
+        if not wallbangEnabled then return end
+        local rootPart = getRootPart()
+        if not rootPart then return end
+        
+        for part, data in pairs(wallbangOriginal) do
+            if part and part.Parent then
+                part.CanCollide = data.CanCollide
+                part.Transparency = data.Transparency
+            end
+        end
+        wallbangOriginal = {}
+        
+        local targets = zombieModeEnabled and findPlayers() or findZombies()
+        local char = getCharacter()
+        if not char then return end
+        
+        for _, target in pairs(targets) do
+            if target:FindFirstChild("HumanoidRootPart") then
+                local origin = rootPart.Position
+                local direction = (target.HumanoidRootPart.Position - origin)
+                local distance = direction.Magnitude
+                if distance > 2000 then continue end
+                
+                local rayParams = RaycastParams.new()
+                rayParams.FilterType = Enum.RaycastFilterType.Exclude
+                rayParams.FilterDescendantsInstances = {char, target}
+                
+                local currentOrigin = origin
+                local remaining = distance
+                for i = 1, 10 do
+                    if remaining <= 0 then break end
+                    local result = workspace:Raycast(currentOrigin, direction.Unit * remaining, rayParams)
+                    if not result then break end
+                    
+                    local hitPart = result.Instance
+                    if hitPart and not hitPart:IsDescendantOf(char) and not hitPart:IsDescendantOf(target) then
+                        if not hitPart:IsA("Terrain") then
+                            if not wallbangOriginal[hitPart] then
+                                wallbangOriginal[hitPart] = {
+                                    CanCollide = hitPart.CanCollide,
+                                    Transparency = hitPart.Transparency
+                                }
+                            end
+                            hitPart.CanCollide = false
+                            hitPart.Transparency = 0.7
+                        end
+                    end
+                    
+                    currentOrigin = result.Position + direction.Unit * 0.1
+                    remaining = remaining - (result.Position - currentOrigin).Magnitude - 0.1
+                end
+            end
+        end
+    end)
+end
+
+local function stopWallbang()
+    if wallbangConnection then
+        wallbangConnection:Disconnect()
+        wallbangConnection = nil
+    end
+    for part, data in pairs(wallbangOriginal) do
+        if part and part.Parent then
+            part.CanCollide = data.CanCollide
+            part.Transparency = data.Transparency
+        end
+    end
+    wallbangOriginal = {}
+end
+
+spawn(function()
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if not damageBoostEnabled then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        
+        pcall(function()
+            local char = getCharacter()
+            if not char then return end
+            
+            local weapon = nil
+            for _, child in pairs(char:GetChildren()) do
+                if child:IsA("Tool") or child:IsA("Model") then
+                    if child:FindFirstChild("Handle") or child:FindFirstChild("Client") then
+                        weapon = child
+                        break
+                    end
+                end
+            end
+            if not weapon then return end
+            
+            local closestTarget = getClosestTarget()
+            if not closestTarget then return end
+            if not closestTarget:FindFirstChild("Head") then return end
+            if not closestTarget:FindFirstChild("Humanoid") then return end
+            
+            local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+            if not remotes then return end
+            local gunFolder = remotes:FindFirstChild("Gun")
+            if not gunFolder then return end
+            local onHit = gunFolder:FindFirstChild("OnHit")
+            if not onHit then return end
+            
+            wait(0.05)
+            onHit:FireServer(weapon, "OnHitEnemy", closestTarget.Head, closestTarget, closestTarget.Humanoid, 1000, closestTarget.Head.Position)
+        end)
+    end)
+end)
+
+local function startBhop()
+    local char = getCharacter()
+    if not char then return end
+    local humanoid = char:FindFirstChild("Humanoid")
+    if not humanoid then return end
+    
+    humanoid.UseJumpPower = true
+    humanoid.JumpPower = 80
+    humanoid.WalkSpeed = 32
+    
+    if bhopConnection then bhopConnection:Disconnect() end
+    bhopConnection = RunService.Heartbeat:Connect(function()
+        if not bhopEnabled then return end
+        local c = getCharacter()
+        if not c then return end
+        local h = c:FindFirstChild("Humanoid")
+        if not h then return end
+        
+        h.WalkSpeed = 32
+        
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+            if h.FloorMaterial ~= Enum.Material.Air then
+                h:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end
+    end)
+    
+    if infJumpConnection then infJumpConnection:Disconnect() end
+    infJumpConnection = humanoid.StateChanged:Connect(function(_, newState)
+        if not bhopEnabled then return end
+        if newState == Enum.HumanoidStateType.Landed then
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+        end
+    end)
+    
+    humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+end
+
+local function stopBhop()
+    if bhopConnection then
+        bhopConnection:Disconnect()
+        bhopConnection = nil
+    end
+    if infJumpConnection then
+        infJumpConnection:Disconnect()
+        infJumpConnection = nil
+    end
+    local char = getCharacter()
+    if char then
+        local h = char:FindFirstChild("Humanoid")
+        if h then
+            h.WalkSpeed = 16
+            h.JumpPower = 50
+        end
+    end
+end
+
+local function startHitbox()
+    if hitboxConnection then hitboxConnection:Disconnect() end
+    hitboxConnection = RunService.Heartbeat:Connect(function()
+        if not hitboxEnabled then return end
+        local char = getCharacter()
+        
+        local targets = zombieModeEnabled and findPlayers() or findZombies()
+        for _, target in pairs(targets) do
+            if target and target:FindFirstChild("HumanoidRootPart") then
+                local hrp = target.HumanoidRootPart
+                if not hitboxOriginal[hrp] then
+                    hitboxOriginal[hrp] = hrp.Size
+                end
+                hrp.Size = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
+                hrp.Transparency = 0.7
+                hrp.CanCollide = false
+            end
+        end
+    end)
+end
+
+local function stopHitbox()
+    if hitboxConnection then
+        hitboxConnection:Disconnect()
+        hitboxConnection = nil
+    end
+    for hrp, origSize in pairs(hitboxOriginal) do
+        if hrp and hrp.Parent then
+            hrp.Size = origSize
+            hrp.Transparency = 1
+        end
+    end
+    hitboxOriginal = {}
+end
+
+local function startAutoKill()
+    if killConnection then killConnection:Disconnect() end
+    
+    killConnection = RunService.Heartbeat:Connect(function()
+        if not autoKillEnabled then return end
+        local char = getCharacter()
+        local rootPart = getRootPart()
+        if not char or not rootPart then return end
+        
+        local target = getClosestTarget()
+        if target and target:FindFirstChild("Humanoid") then
+            for _, v in pairs(ReplicatedStorage:GetDescendants()) do
+                if v:IsA("RemoteEvent") and (v.Name:lower():find("damage") or 
+                   v.Name:lower():find("hit") or v.Name:lower():find("attack")) then
+                    pcall(function()
+                        v:FireServer(target.Humanoid, 999999)
+                    end)
+                end
+            end
+        end
+    end)
+end
+
+-- Combat Tab
+local AimbotToggle = Tabs.Combat:AddToggle("Aimbot", {
+    Title = "Aimbot",
+    Description = "Locks camera on closest target (hold RMB)",
+    Default = false,
+    Callback = function(Value)
+        silentAimEnabled = Value
+        if Value then
+            startAimbot()
+        else
+            stopAimbot()
+        end
+        Fluent:Notify({
+            Title = "Aimbot",
+            Content = Value and "Enabled - hold RMB to aim" or "Disabled",
+            Duration = 3
+        })
+    end
+})
+
+local FOVSlider = Tabs.Combat:AddSlider("AimFOV", {
+    Title = "Aimbot FOV",
+    Description = "Aim circle radius in pixels",
+    Default = 150,
+    Min = 30,
+    Max = 500,
+    Rounding = 0,
+    Callback = function(Value)
+        aimFOV = Value
+    end
+})
+
+local AutoKillToggle = Tabs.Combat:AddToggle("AutoKill", {
+    Title = "Auto Kill",
+    Description = "Automatically kills the nearest target",
+    Default = false,
+    Callback = function(Value)
+        autoKillEnabled = Value
+        if Value then
+            startAutoKill()
+        else
+            if killConnection then
+                killConnection:Disconnect()
+            end
+        end
+        Fluent:Notify({
+            Title = "Auto Kill",
+            Content = Value and "Enabled" or "Disabled",
+            Duration = 3
+        })
+    end
+})
+
+local DamageBoostToggle = Tabs.Combat:AddToggle("DamageBoost", {
+    Title = "Damage Boost (1000 DMG)",
+    Description = "Each shot deals 1000 damage to closest target",
+    Default = false,
+    Callback = function(Value)
+        damageBoostEnabled = Value
+        Fluent:Notify({
+            Title = "Damage Boost",
+            Content = Value and "Enabled - 1000 damage per shot" or "Disabled",
+            Duration = 3
+        })
+    end
+})
+
+local ZombieModeToggle = Tabs.Combat:AddToggle("ZombieMode", {
+    Title = "Zombie Mode",
+    Description = "Switches targets to players",
+    Default = false,
+    Callback = function(Value)
+        zombieModeEnabled = Value
+        
+        if espEnabled then
+            toggleESP(false)
+            wait(0.1)
+            toggleESP(true)
+        end
+        
+        Fluent:Notify({
+            Title = "Zombie Mode",
+            Content = Value and "Enabled - targeting players" or "Disabled - targeting zombies",
+            Duration = 3
+        })
+    end
+})
+
+local HitboxToggle = Tabs.Combat:AddToggle("Hitbox", {
+    Title = "Hitbox Expander",
+    Description = "Expands target hitboxes",
+    Default = false,
+    Callback = function(Value)
+        hitboxEnabled = Value
+        if Value then
+            startHitbox()
+        else
+            stopHitbox()
+        end
+        Fluent:Notify({
+            Title = "Hitbox Expander",
+            Content = Value and "Enabled - hitboxes expanded" or "Disabled",
+            Duration = 3
+        })
+    end
+})
+
+local HitboxSlider = Tabs.Combat:AddSlider("HitboxSize", {
+    Title = "Hitbox Size",
+    Description = "Target HumanoidRootPart size",
+    Default = 10,
+    Min = 3,
+    Max = 50,
+    Rounding = 0,
+    Callback = function(Value)
+        hitboxSize = Value
+    end
+})
+
+-- Visuals Tab
+local ESPToggle = Tabs.Visuals:AddToggle("ESP", {
+    Title = "ESP",
+    Description = "Shows targets through walls",
+    Default = false,
+    Callback = function(Value)
+        espEnabled = Value
+        toggleESP(Value)
+        Fluent:Notify({
+            Title = "ESP",
+            Content = Value and "Enabled" or "Disabled",
+            Duration = 3
+        })
+    end
+})
+
+local ChamsToggle = Tabs.Visuals:AddToggle("Chams", {
+    Title = "Player Chams",
+    Description = "Highlights players with their team color",
+    Default = false,
+    Callback = function(Value)
+        chamsEnabled = Value
+        toggleChams(Value)
+        Fluent:Notify({
+            Title = "Chams",
+            Content = Value and "Enabled - team colors visible" or "Disabled",
+            Duration = 3
+        })
+    end
+})
+
+local HPDisplayToggle = Tabs.Visuals:AddToggle("HPDisplay", {
+    Title = "Player HP Display",
+    Description = "Shows health bar and HP above players",
+    Default = false,
+    Callback = function(Value)
+        hpDisplayEnabled = Value
+        toggleHPDisplay(Value)
+        Fluent:Notify({
+            Title = "HP Display",
+            Content = Value and "Enabled - player HP visible" or "Disabled",
+            Duration = 3
+        })
+    end
+})
+
+local FOVCamSlider = Tabs.Visuals:AddSlider("CameraFOV", {
+    Title = "Camera FOV",
+    Description = "Camera field of view",
+    Default = 70,
+    Min = 30,
+    Max = 120,
+    Rounding = 0,
+    Callback = function(Value)
+        defaultFOV = Value
+        workspace.CurrentCamera.FieldOfView = Value
+    end
+})
+
+RunService.RenderStepped:Connect(function()
+    if defaultFOV ~= 70 then
+        workspace.CurrentCamera.FieldOfView = defaultFOV
+    end
+end)
+
+Tabs.Visuals:AddParagraph({
+    Title = "Viewmodel (hands/weapon)",
+    Content = "Weapon model offset in hands"
+})
+
+local VMXSlider = Tabs.Visuals:AddSlider("ViewmodelX", {
+    Title = "Viewmodel X",
+    Description = "Left/right offset",
+    Default = 0,
+    Min = -5,
+    Max = 5,
+    Rounding = 1,
+    Callback = function(Value)
+        viewmodelOffset = Vector3.new(Value, viewmodelOffset.Y, viewmodelOffset.Z)
+    end
+})
+
+local VMYSlider = Tabs.Visuals:AddSlider("ViewmodelY", {
+    Title = "Viewmodel Y",
+    Description = "Up/down offset",
+    Default = 0,
+    Min = -5,
+    Max = 5,
+    Rounding = 1,
+    Callback = function(Value)
+        viewmodelOffset = Vector3.new(viewmodelOffset.X, Value, viewmodelOffset.Z)
+    end
+})
+
+local VMZSlider = Tabs.Visuals:AddSlider("ViewmodelZ", {
+    Title = "Viewmodel Z",
+    Description = "Forward/backward offset",
+    Default = 0,
+    Min = -5,
+    Max = 5,
+    Rounding = 1,
+    Callback = function(Value)
+        viewmodelOffset = Vector3.new(viewmodelOffset.X, viewmodelOffset.Y, Value)
+    end
+})
+
+RunService.RenderStepped:Connect(function()
+    if viewmodelOffset.Magnitude == 0 then return end
+    local char = getCharacter()
+    if not char then return end
+    
+    for _, child in pairs(char:GetChildren()) do
+        if child:IsA("Tool") or child:IsA("Model") then
+            if child:FindFirstChild("Handle") or child:FindFirstChild("Client") then
+                for _, part in pairs(child:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        pcall(function()
+                            part.CFrame = part.CFrame * CFrame.new(viewmodelOffset)
+                        end)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+local femboyImages = {
+    "rbxassetid://6023426945",
+    "rbxassetid://6023426926",
+    "rbxassetid://6023426908",
+    "rbxassetid://6023426890",
+    "rbxassetid://6023426868",
+    "rbxassetid://6023426850",
+    "rbxassetid://6023426832",
+    "rbxassetid://6023426816",
+    "rbxassetid://6023426798",
+    "rbxassetid://6023426780",
+}
+
+local function applyFemboySkin()
+    local char = getCharacter()
+    if not char then return end
+    
+    for _, child in pairs(char:GetChildren()) do
+        if child:IsA("Tool") or child:IsA("Model") then
+            if child:FindFirstChild("Handle") or child:FindFirstChild("Client") then
+                for _, part in pairs(child:GetDescendants()) do
+                    pcall(function()
+                        local randomImg = femboyImages[math.random(1, #femboyImages)]
+                        
+                        if part:IsA("Texture") or part:IsA("Decal") then
+                            if not femboySkinOriginal[part] then
+                                femboySkinOriginal[part] = part.Texture
+                            end
+                            part.Texture = randomImg
+                        end
+                        
+                        if part:IsA("MeshPart") then
+                            if not femboySkinOriginal[part] then
+                                femboySkinOriginal[part] = part.TextureID
+                            end
+                            part.TextureID = randomImg
+                        end
+                        
+                        if part:IsA("SpecialMesh") then
+                            if not femboySkinOriginal[part] then
+                                femboySkinOriginal[part] = part.TextureId
+                            end
+                            part.TextureId = randomImg
+                        end
+                        
+                        if part:IsA("BasePart") and not part:IsA("MeshPart") then
+                            if not part:FindFirstChild("FemboySkin") then
+                                for _, face in pairs({Enum.NormalId.Front, Enum.NormalId.Back, Enum.NormalId.Left, Enum.NormalId.Right, Enum.NormalId.Top, Enum.NormalId.Bottom}) do
+                                    local decal = Instance.new("Decal")
+                                    decal.Name = "FemboySkin"
+                                    decal.Texture = femboyImages[math.random(1, #femboyImages)]
+                                    decal.Face = face
+                                    decal.Parent = part
+                                end
+                            end
+                        end
+                    end)
+                end
+            end
+        end
+    end
+end
+
+local function startFemboySkin()
+    applyFemboySkin()
+    if femboySkinConnection then femboySkinConnection:Disconnect() end
+    femboySkinConnection = RunService.Heartbeat:Connect(function()
+        if not femboySkinEnabled then return end
+        applyFemboySkin()
+    end)
+end
+
+local function stopFemboySkin()
+    if femboySkinConnection then
+        femboySkinConnection:Disconnect()
+        femboySkinConnection = nil
+    end
+    for obj, original in pairs(femboySkinOriginal) do
+        pcall(function()
+            if obj and obj.Parent then
+                if obj:IsA("Texture") or obj:IsA("Decal") then
+                    obj.Texture = original
+                elseif obj:IsA("MeshPart") then
+                    obj.TextureID = original
+                elseif obj:IsA("SpecialMesh") then
+                    obj.TextureId = original
+                end
+            end
+        end)
+    end
+    femboySkinOriginal = {}
+    local char = getCharacter()
+    if char then
+        for _, child in pairs(char:GetDescendants()) do
+            if child:IsA("Decal") and child.Name == "FemboySkin" then
+                child:Destroy()
+            end
+        end
+    end
+end
+
+local skyboxList = {
+    {name = "Sunset", top = "rbxassetid://1012890", bt = "rbxassetid://1012891", lf = "rbxassetid://1012887", rt = "rbxassetid://1012889", ft = "rbxassetid://1012886", bk = "rbxassetid://1012888"},
+    {name = "Night Stars", top = "rbxassetid://12064107", bt = "rbxassetid://12064152", lf = "rbxassetid://12064115", rt = "rbxassetid://12064131", ft = "rbxassetid://12064121", bk = "rbxassetid://12064141"},
+    {name = "Nebula", top = "rbxassetid://159454286", bt = "rbxassetid://159454299", lf = "rbxassetid://159454293", rt = "rbxassetid://159454296", ft = "rbxassetid://159454284", bk = "rbxassetid://159454290"},
+    {name = "Aurora", top = "rbxassetid://2909455195", bt = "rbxassetid://2909455195", lf = "rbxassetid://2909455195", rt = "rbxassetid://2909455195", ft = "rbxassetid://2909455195", bk = "rbxassetid://2909455195"},
+    {name = "Cloudy", top = "rbxassetid://252482125", bt = "rbxassetid://252482125", lf = "rbxassetid://252482125", rt = "rbxassetid://252482125", ft = "rbxassetid://252482125", bk = "rbxassetid://252482125"},
+}
+
+local FemboySkinToggle = Tabs.Visuals:AddToggle("FemboySkin", {
+    Title = "Femboy Weapon Skin",
+    Description = "Replaces weapon textures with random femboy images",
+    Default = false,
+    Callback = function(Value)
+        femboySkinEnabled = Value
+        if Value then
+            startFemboySkin()
+        else
+            stopFemboySkin()
+        end
+        Fluent:Notify({
+            Title = "Femboy Skin",
+            Content = Value and "Enabled - textures replaced" or "Disabled - textures restored",
+            Duration = 3
+        })
+    end
+})
+
+Tabs.Visuals:AddButton({
+    Title = "Random Skybox",
+    Description = "Applies a random skybox preset",
+    Callback = function()
+        local chosen = skyboxList[math.random(1, #skyboxList)]
+        
+        local lighting = game:GetService("Lighting")
+        for _, v in pairs(lighting:GetChildren()) do
+            if v:IsA("Sky") then
+                v:Destroy()
+            end
+        end
+        
+        local sky = Instance.new("Sky")
+        sky.SkyboxUp = chosen.top
+        sky.SkyboxDn = chosen.bt
+        sky.SkyboxLf = chosen.lf
+        sky.SkyboxRt = chosen.rt
+        sky.SkyboxFt = chosen.ft
+        sky.SkyboxBk = chosen.bk
+        sky.Parent = lighting
+        
+        Fluent:Notify({
+            Title = "Skybox",
+            Content = "Applied: " .. chosen.name,
+            Duration = 3
+        })
+    end
+})
+
+Tabs.Visuals:AddButton({
+    Title = "Reset Skybox",
+    Description = "Removes custom skybox",
+    Callback = function()
+        local lighting = game:GetService("Lighting")
+        for _, v in pairs(lighting:GetChildren()) do
+            if v:IsA("Sky") then
+                v:Destroy()
+            end
+        end
+        Fluent:Notify({
+            Title = "Skybox",
+            Content = "Skybox reset",
+            Duration = 3
+        })
+    end
+})
+
+-- Misc Tab
+Tabs.Misc:AddParagraph({
+    Title = "Instructions",
+    Content = "Aimbot - locks camera on target (hold RMB)\nAuto Kill - automatic kill\nESP - shows enemies through walls\nZombie Mode - for playing as zombie\nFly - flight (WASD + Space/Shift)\nNoclip - walk through walls\n\nPress Right Control to hide/show UI"
+})
+
+Tabs.Misc:AddButton({
+    Title = "Clear Console",
+    Description = "Clears all console messages",
+    Callback = function()
+        if rconsoleclear then
+            rconsoleclear()
+        elseif consoleclear then
+            consoleclear()
+        end
+        Fluent:Notify({
+            Title = "Console",
+            Content = "Console cleared!",
+            Duration = 3
+        })
+    end
+})
+
+local NoRecoilToggle = Tabs.Misc:AddToggle("NoRecoil", {
+    Title = "No Recoil",
+    Description = "Removes camera shake when shooting",
+    Default = false,
+    Callback = function(Value)
+        local camera = workspace.CurrentCamera
+        if Value then
+            for _, v in pairs(camera:GetChildren()) do
+                if v:IsA("Script") or v:IsA("LocalScript") then
+                    v.Disabled = true
+                end
+            end
+            
+            local oldCFrame = camera.CFrame
+            camera:GetPropertyChangedSignal("CFrame"):Connect(function()
+                if Value then
+                    camera.CFrame = oldCFrame
+                    oldCFrame = camera.CFrame
+                end
+            end)
+        end
+        
+        Fluent:Notify({
+            Title = "Recoil",
+            Content = Value and "Recoil disabled" or "Recoil enabled",
+            Duration = 3
+        })
+    end
+})
+
+local FlyToggle = Tabs.Misc:AddToggle("Fly", {
+    Title = "Fly",
+    Description = "Flight: WASD + Space/Shift for up/down",
+    Default = false,
+    Callback = function(Value)
+        flyEnabled = Value
+        if Value then
+            startFly()
+        else
+            stopFly()
+        end
+        Fluent:Notify({
+            Title = "Fly",
+            Content = Value and "Enabled - WASD + Space/Shift" or "Disabled",
+            Duration = 3
+        })
+    end
+})
+
+local FlySpeedSlider = Tabs.Misc:AddSlider("FlySpeed", {
+    Title = "Fly Speed",
+    Description = "Movement speed while flying",
+    Default = 50,
+    Min = 10,
+    Max = 200,
+    Rounding = 0,
+    Callback = function(Value)
+        flySpeed = Value
+    end
+})
+
+local NoclipToggle = Tabs.Misc:AddToggle("Noclip", {
+    Title = "Noclip",
+    Description = "Walk through walls and objects",
+    Default = false,
+    Callback = function(Value)
+        noclipEnabled = Value
+        if Value then
+            startNoclip()
+        else
+            stopNoclip()
+        end
+        Fluent:Notify({
+            Title = "Noclip",
+            Content = Value and "Enabled - walking through walls" or "Disabled",
+            Duration = 3
+        })
+    end
+})
+
+local WallbangToggle = Tabs.Misc:AddToggle("Wallbang", {
+    Title = "Wallbang",
+    Description = "Removes walls between you and targets (shoot through walls)",
+    Default = false,
+    Callback = function(Value)
+        wallbangEnabled = Value
+        if Value then
+            startWallbang()
+        else
+            stopWallbang()
+        end
+        Fluent:Notify({
+            Title = "Wallbang",
+            Content = Value and "Enabled - walls transparent" or "Disabled",
+            Duration = 3
+        })
+    end
+})
+
+local BhopToggle = Tabs.Misc:AddToggle("Bhop", {
+    Title = "Bhop (Auto Jump)",
+    Description = "Auto jump while holding Space, no cooldown",
+    Default = false,
+    Callback = function(Value)
+        bhopEnabled = Value
+        if Value then
+            startBhop()
+        else
+            stopBhop()
+        end
+        Fluent:Notify({
+            Title = "Bhop",
+            Content = Value and "Enabled - hold Space" or "Disabled",
+            Duration = 3
+        })
+    end
+})
+
+local MoneyLabel = Tabs.Misc:AddParagraph({
+    Title = "Money",
+    Content = "0"
+})
+
+spawn(function()
+    while wait(1) do
+        pcall(function()
+            local money = LocalPlayer:FindFirstChild("leaderstats") and 
+                         (LocalPlayer.leaderstats:FindFirstChild("Money") or
+                          LocalPlayer.leaderstats:FindFirstChild("Cash") or
+                          LocalPlayer.leaderstats:FindFirstChild("Points"))
+            
+            if money then
+                MoneyLabel:SetDesc(tostring(money.Value))
+            end
+        end)
+    end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function()
+    wait(1)
+    if autoKillEnabled then
+        startAutoKill()
+    end
+    if flyEnabled then
+        startFly()
+    end
+    if noclipEnabled then
+        startNoclip()
+    end
+    if bhopEnabled then
+        startBhop()
+    end
+end)
+
+Fluent:Notify({
+    Title = "Left 4 Blox",
+    Content = "Script loaded successfully!",
+    Duration = 5
+})
+
+print("Left 4 Blox Script loaded!")
